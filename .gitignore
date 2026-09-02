@@ -1,0 +1,57 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
+pip-wheel-metadata/
+
+# --- Secrets / local env ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+secrets.json
+
+# --- Editors / OS ---
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Weights, pickles, medical pixels ---
+*.pt
+*.pth
+*.ckpt
+*.pkl
+*.pickle
+*.dcm
+*.nrrd
+
+# --- Generated runs (keep folder READMEs) ---
+fixtures/smoke/
+reporting/orchestrator/
+reporting/training/**
+!reporting/training/README.md
+!reporting/training/.gitkeep
+
+# --- Local research scratch (not this package) ---
+prompt_history/
+lit review/
+coding examples/
+
+# --- Logs / notebooks / local PDFs ---
+*.log
+.ipynb_checkpoints/
+*.pdf

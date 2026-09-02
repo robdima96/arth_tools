@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arth-tools"
+version = "0.2.0"
+description = "Export, split, train, and evaluate arthritis imaging models."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "robdima96" }]
+dependencies = [
+    "torch>=2.2",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "pillow>=10.0",
+    "scikit-learn>=1.4",
+    "pydicom>=2.4",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "matplotlib>=3.8",
+    "optuna>=3.6",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+resnet = ["transformers>=4.40"]
+
+[project.urls]
+Repository = "https://github.com/robdima96/arth_tools"
+
+[project.scripts]
+arth-tools = "arth_tools.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["arth_tools*"]

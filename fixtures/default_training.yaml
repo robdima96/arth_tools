@@ -1,0 +1,34 @@
+# Optional YAML overlay on the CONTROL BOARD (arth_tools/training/config.py).
+# Real runs: edit the control board and run python -m arth_tools.training.train
+# Smoke tests build TrainingConfig in code and do not need this file.
+
+architecture_id: cnn
+architecture_name: VGG-inspired CNN
+loss_name: sparse_categorical_crossentropy
+output_type: softmax
+num_classes: 2
+input_height: 16
+input_width: 16
+input_channels: 3
+num_kernels: 8
+primary_metric: accuracy
+freeze_min_value: 0.0
+freeze_min_epoch: 1
+freeze_mode: max
+seed: 0
+device: cpu
+epochs: 2
+batch_size: 4
+learning_rate: 0.001
+freeze_backbone: false
+class_weights: false
+oversample_minority: false
+train_jitter: false
+train_zscore: true
+use_early_stopping: true
+use_reduce_lr: true
+eval_on_test: true
+eval_patient_aggregate: true
+hpo:
+  enabled: false
+  n_trials: 4
