@@ -1,0 +1,11 @@
+# Header YOLO (MRI). Not a catalog tool / not a TrainingConfig overlay.
+modality: mri
+class_name: image_region
+img_size: 416
+conf_threshold: 0.25
+rotation_deg: 15.0
+hflip: true
+epochs: 50
+batch_size: 8
+learning_rate: 0.001
+data_root: data/roi

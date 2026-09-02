@@ -1,6 +1,6 @@
 """Criteria-gated freeze of the best checkpoint.
 
-A copy is written under the run report AND (when possible) under E:\\ArthAgent\\frozen.
+A copy is written under the run report AND (when possible) under DATA_ROOT/frozen.
 """
 
 from __future__ import annotations
@@ -54,6 +54,7 @@ def freeze_if_criteria_met(
     metadata: dict[str, Any],
     decision: dict[str, Any],
     extra_frozen_dir: Path | None = None,
+    bundle_dir: Path | None = None,
 ) -> Path | None:
     write_freeze_decision(run_dir, decision)
     if not decision["frozen"]:
@@ -72,11 +73,38 @@ def freeze_if_criteria_met(
         json.dumps({**metadata, "freeze": decision}, indent=2, default=str),
         encoding="utf-8",
     )
+    if bundle_dir is not None and Path(bundle_dir).is_dir():
+        for name in (
+            "bundle.json",
+            "state_dict.pt",
+            "model.pt",
+            "model_spec.yaml",
+            "config_snapshot.yaml",
+            "preprocess.json",
+            "label_map.json",
+            "zscore.json",
+        ):
+            src = Path(bundle_dir) / name
+            if src.is_file():
+                shutil.copy2(src, frozen_dir / name)
     if extra_frozen_dir is not None:
         try:
             extra_frozen_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(dest_pt, extra_frozen_dir / "model.pt")
             shutil.copy2(frozen_dir / "metadata.json", extra_frozen_dir / "metadata.json")
+            if (frozen_dir / "bundle.json").is_file():
+                for name in (
+                    "bundle.json",
+                    "state_dict.pt",
+                    "model_spec.yaml",
+                    "config_snapshot.yaml",
+                    "preprocess.json",
+                    "label_map.json",
+                    "zscore.json",
+                ):
+                    src = frozen_dir / name
+                    if src.is_file():
+                        shutil.copy2(src, extra_frozen_dir / name)
         except OSError:
             pass
     return dest_pt

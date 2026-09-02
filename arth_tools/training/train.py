@@ -6,7 +6,7 @@ Edit arth_tools/training/config.py (the CONTROL BOARD), then::
 
     python -m arth_tools.training.train
 
-Smoke tests pass a TrainingConfig with fixture paths instead of E:\\ manifests.
+Smoke tests pass a TrainingConfig with fixture paths instead of the default data/ manifests.
 """
 
 from __future__ import annotations
@@ -29,13 +29,10 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from arth_tools.data.dataset import ManifestClassificationDataset, compute_train_zscore
+from arth_tools.data.preprocess import PreprocessRecipe
 from arth_tools.models.spec import dump_spec, spec_from_training_config
-from arth_tools.training.backbones import (
-    build_cnn_model,
-    build_model,
-    forward_logits,
-    set_backbone_trainable,
-)
+from arth_tools.models.load import write_run_bundle
+from arth_tools.training.backbones import build_model, forward_logits, set_backbone_trainable
 from arth_tools.training.metrics import batch_loss, run_eval
 from arth_tools.training.config import (
     TrainingConfig,
@@ -183,12 +180,15 @@ def _write_model_details(model: nn.Module, cfg: TrainingConfig, dest: Path) -> N
 
 def train(cfg: TrainingConfig | None = None) -> dict[str, Any]:
     cfg = cfg or TrainingConfig()
+    cfg.apply_label_map_file()
     if cfg.train_manifest is None or cfg.val_manifest is None:
         raise ValueError("train_manifest and val_manifest are required")
 
     print("\n" + "=" * 70)
     print("STARTING TRAINING")
     print("=" * 70)
+    if cfg.task_id:
+        print(f"Task: {cfg.task_id}  modality={cfg.modality or '-'}  classes={cfg.num_classes}")
 
     seed_everything(cfg.seed)
     device = resolve_device(cfg.device)
@@ -221,6 +221,7 @@ def train(cfg: TrainingConfig | None = None) -> dict[str, Any]:
         regression=regression,
         output_type=cfg.output_type,
         loss_name=cfg.loss_name,
+        recipe=PreprocessRecipe.from_training_config(cfg),
     )
     ds_val = ManifestClassificationDataset(
         cfg.val_manifest,
@@ -233,6 +234,7 @@ def train(cfg: TrainingConfig | None = None) -> dict[str, Any]:
         regression=regression,
         output_type=cfg.output_type,
         loss_name=cfg.loss_name,
+        recipe=PreprocessRecipe.from_training_config(cfg),
     )
 
     print("\n=== Dataset summary ===")
@@ -275,27 +277,10 @@ def train(cfg: TrainingConfig | None = None) -> dict[str, Any]:
         num_workers=cfg.dataloader_num_workers,
     )
 
-    # Build model (explicit CNN by default)
     print("\n" + "=" * 70)
     print("BUILD MODEL")
     print("=" * 70)
-    if cfg.architecture_id.lower() in {"cnn", "tiny_cnn", "tinycnn", "vgg_cnn"}:
-        model = build_cnn_model(
-            output_type=cfg.output_type,
-            num_kernels=cfg.num_kernels,
-            kernel_size=cfg.kernel_size,
-            conv_stride=cfg.conv_stride,
-            pool_stride=cfg.pool_stride,
-            activation_func=cfg.activation_func,
-            input_height=cfg.input_height,
-            input_width=cfg.input_width,
-            input_channels=cfg.input_channels,
-            num_classes=cfg.num_classes,
-            drop=cfg.drop,
-            spatial_drop=cfg.spatial_drop,
-        )
-    else:
-        model = build_model(cfg)
+    model = build_model(cfg)
     model = model.to(device)
     print(model)
     _write_model_details(model, cfg, run_dir / "model_details.txt")
@@ -346,7 +331,7 @@ def train(cfg: TrainingConfig | None = None) -> dict[str, Any]:
 
     for epoch in range(1, cfg.epochs + 1):
         freeze_bb = cfg.freeze_backbone and epoch <= cfg.freeze_backbone_epochs
-        set_backbone_trainable(model, trainable=not freeze_bb)
+        set_backbone_trainable(model, trainable=not freeze_bb, architecture_id=cfg.architecture_id)
         model.train()
         epoch_losses: list[float] = []
         for xb, yb in train_loader:
@@ -460,6 +445,16 @@ def train(cfg: TrainingConfig | None = None) -> dict[str, Any]:
         "spec_dump": spec.model_dump(),
         "hyperparameters": cfg.hyperparameters_dict(),
     }
+    bundle_dir = None
+    try:
+        bundle_dir = write_run_bundle(
+            run_dir,
+            cfg,
+            checkpoint=best_path if best_path.is_file() else None,
+            model=None if best_path.is_file() else model,
+        )
+    except FileNotFoundError:
+        bundle_dir = None
     frozen_path = None
     if best_path.is_file() and best_metric is not None:
         frozen_path = freeze_if_criteria_met(
@@ -468,6 +463,7 @@ def train(cfg: TrainingConfig | None = None) -> dict[str, Any]:
             metadata,
             decision,
             extra_frozen_dir=cfg.frozen_dir / run_id,
+            bundle_dir=bundle_dir,
         )
     else:
         write_freeze_decision(run_dir, {**decision, "frozen": False, "reason": "no checkpoint"})
@@ -479,6 +475,7 @@ def train(cfg: TrainingConfig | None = None) -> dict[str, Any]:
         "best_metric": best_metric,
         "frozen": bool(decision["frozen"] and frozen_path is not None),
         "frozen_path": str(frozen_path) if frozen_path else None,
+        "bundle_dir": str(bundle_dir) if bundle_dir else None,
         "eval": None,
     }
     test_path = Path(cfg.test_manifest) if cfg.test_manifest else None
@@ -505,8 +502,9 @@ def train(cfg: TrainingConfig | None = None) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Train from the control board (optional YAML overlay).")
-    ap.add_argument("--config", type=Path, help="Optional YAML overlay on TrainingConfig")
+    ap = argparse.ArgumentParser(description="Train from the control board (optional task YAML).")
+    ap.add_argument("--config", type=Path, help="Task YAML (configs/kl_grade.yaml or kl_grade)")
+    ap.add_argument("--architecture", type=str, help="Override architecture_id (e.g. cnn, resnet50)")
     ap.add_argument("--train-manifest", type=Path)
     ap.add_argument("--val-manifest", type=Path)
     ap.add_argument("--test-manifest", type=Path)
@@ -516,6 +514,8 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     cfg = load_config_yaml(args.config) if args.config else TrainingConfig()
+    if args.architecture:
+        cfg.architecture_id = args.architecture
     if args.train_manifest:
         cfg.train_manifest = args.train_manifest
     if args.val_manifest:

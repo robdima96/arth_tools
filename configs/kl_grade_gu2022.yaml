@@ -1,0 +1,52 @@
+# Literature stub for Gu et al. 2022 KL pipeline. Not a TrainingConfig.
+# Infer is not wired; train on labelled DICOMs with the arth_tools CNN tool
+# under the same KL grade task.
+
+task_id: kl_grade
+task_name: Kellgren-Lawrence osteoarthritis grade
+preprocess_consume: external
+
+info:
+  summary: >
+    Five-class Kellgren–Lawrence grade on PA knee radiographs using the
+    authors’ detection + VGG-16 + U-Net JSN + random-forest pipeline
+    (Gu et al., 2022). Packaged inference is not wired in arth_tools yet.
+  methods: >
+    (1) Resample DICOM pixels to 0.2 mm/pixel and convert 16-bit to 8-bit.
+    (2) YOLOv3-Tiny detects the two knee joints (top-2 boxes by confidence).
+    (3) VGG-16 with batch norm classifies a 672×672 crop scaled to 256×256.
+    (4) CoordConv U-Net segments femur vs tibia/fibula and measures medial
+    and lateral joint-space distance (JSD).
+    (5) A random forest fuses 5-class KL probabilities with the two JSD
+    values into the displayed KL grade.
+    Trained on MOST PA views; tested on MOST, OAI, and Duke PA films.
+    The authors also ship a standalone GUI/CLI executable (no Python required).
+  parameters:
+    view: PA
+    pixel_spacing_mm: 0.2
+    detector: yolov3-tiny
+    classifier: vgg16_bn
+    crop_px: 672
+    classifier_input: 256
+    segmenter: unet_coordconv
+    fusion: random_forest
+    num_classes: 5
+  citations:
+    - title: "Knee arthritis severity measurement using deep learning: a prospectively validated study"
+      authors: Gu H, Li K, Colglazier RJ, et al.
+      year: 2022
+      venue: arXiv
+      doi: "10.48550/arXiv.2203.08914"
+      url: https://arxiv.org/abs/2203.08914
+      code_url: https://github.com/MaciejMazurowski/osteoarthritis-classification
+  models:
+    - name: gu2022_most
+      notes: >
+        Authors’ MOST-trained YOLO / VGG-16 / U-Net / random-forest weights.
+        Download from the paper GitHub (CC BY-NC-SA 4.0, non-commercial).
+        Not an arth_tools bundle. PA radiographs recommended.
+  notes: >
+    Infer is not wired in arth_tools. The authors’ weights are not shipped
+    here (CC BY-NC-SA 4.0). To train a KL classifier on your own labelled
+    DICOMs, use the arth_tools CNN tool under this same task. Their
+    Windows/Mac GUI is a separate executable.

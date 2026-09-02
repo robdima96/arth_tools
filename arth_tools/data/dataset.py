@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-Torch dataset from a CSV manifest (filepath, label, patient_id).
+Torch dataset from a CSV manifest written by export/prepare (filepath, label, patient_id).
 
 Image-only — no segmentation channel. Grayscale ultrasound is replicated to
-3 channels when the control board says so (ResNet / 3-ch CNN).
+3 channels when the control board says so (ResNet / 3-ch CNN). Inference can
+load unlabeled PNG/DICOM paths with the train-time PreprocessRecipe.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -16,6 +18,7 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
+from arth_tools.data.preprocess import PreprocessRecipe, load_image_array, pil_to_float_hwc
 from arth_tools.training.config import (
     FILEPATH_COLUMN,
     LABEL_COLUMN,
@@ -50,6 +53,8 @@ class ManifestClassificationDataset(Dataset):
         loss_name: str = "sparse_categorical_crossentropy",
         zscore_mean: float | None = None,
         zscore_std: float | None = None,
+        require_label: bool = True,
+        recipe: PreprocessRecipe | None = None,
     ) -> None:
         manifest_csv = Path(manifest_csv)
         if not manifest_csv.is_file():
@@ -57,9 +62,12 @@ class ManifestClassificationDataset(Dataset):
         df = pd.read_csv(manifest_csv)
         if df.empty:
             raise ValueError(f"Manifest empty: {manifest_csv}")
-        for col in (filepath_col, label_col):
-            if col not in df.columns:
-                raise KeyError(f"{manifest_csv.name} missing {col!r}; have {list(df.columns)}")
+        if filepath_col not in df.columns:
+            raise KeyError(f"{manifest_csv.name} missing {filepath_col!r}; have {list(df.columns)}")
+        if require_label and label_col not in df.columns:
+            raise KeyError(f"{manifest_csv.name} missing {label_col!r}; have {list(df.columns)}")
+        if label_col not in df.columns:
+            df[label_col] = 0
 
         self.manifest_csv = manifest_csv
         self.rows = df
@@ -76,6 +84,8 @@ class ManifestClassificationDataset(Dataset):
         self.loss_name = loss_name
         self.zscore_mean = zscore_mean
         self.zscore_std = zscore_std
+        self.require_label = require_label
+        self.recipe = recipe
 
         missing = []
         for rel in df[filepath_col]:
@@ -111,19 +121,31 @@ class ManifestClassificationDataset(Dataset):
     def _load_array(self, index: int) -> np.ndarray:
         row = self.rows.iloc[index]
         fp = resolve_path(self.manifest_csv, str(row[self.filepath_col]))
-        pil = Image.open(fp)
-        pil = pil.convert("RGB" if self.replicate_gray else "L")
-        pil = pil.resize(self.image_size, Image.BILINEAR)
-        np_im = np.asarray(pil, dtype=np.float32) / 255.0
-        if np_im.ndim == 2:
-            np_im = np_im[:, :, None]
-        return np_im
+        if self.recipe is not None:
+            recipe = PreprocessRecipe.from_dict(self.recipe.to_dict())
+            recipe.zscore_mean = None
+            recipe.zscore_std = None
+            recipe.resize_width = int(self.image_size[0])
+            recipe.resize_height = int(self.image_size[1])
+        else:
+            recipe = PreprocessRecipe(
+                resize_width=int(self.image_size[0]),
+                resize_height=int(self.image_size[1]),
+                replicate_grayscale_to_rgb=bool(self.replicate_gray),
+                input_channels=3 if self.replicate_gray else 1,
+                zscore_mean=None,
+                zscore_std=None,
+            )
+        suffix = Path(fp).suffix.lower()
+        if suffix in {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}:
+            return pil_to_float_hwc(Image.open(fp), recipe)
+        return load_image_array(fp, recipe)
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
         np_im = self._load_array(index)
         if self.jitter:
-            # Brightness jitter only (geometric aug of IPFP ImageDataGenerator
-            # is not applied here — minority oversampling covers class mix).
+            # Brightness jitter only (geometric aug is not applied here —
+            # minority oversampling covers class mix).
             np_im = np.clip(np_im * float(0.85 + 0.3 * np.random.random()), 0.0, 1.0)
         if self.zscore_mean is not None and self.zscore_std is not None:
             np_im = (np_im - self.zscore_mean) / self.zscore_std
@@ -133,8 +155,11 @@ class ManifestClassificationDataset(Dataset):
         row = self.rows.iloc[index]
         lab = row[self.label_col]
         if pd.isna(lab):
-            fp = resolve_path(self.manifest_csv, str(row[self.filepath_col]))
-            raise ValueError(f"Missing label row {index} for {fp}")
+            if not self.require_label:
+                lab = 0
+            else:
+                fp = resolve_path(self.manifest_csv, str(row[self.filepath_col]))
+                raise ValueError(f"Missing label row {index} for {fp}")
         if self.regression or (
             self.loss_name == "binary_crossentropy" and self.output_type == "sigmoid"
         ):
@@ -152,3 +177,50 @@ def compute_train_zscore(ds: ManifestClassificationDataset, max_images: int = 25
         acc.append(ds._load_array(i).ravel())
     pix = np.concatenate(acc) if acc else np.array([0.0], dtype=np.float32)
     return float(np.mean(pix)), float(np.std(pix) + 1e-8)
+
+
+class ImagePathDataset(Dataset):
+    """Unlabeled PNG/DICOM paths scored with a frozen PreprocessRecipe."""
+
+    def __init__(self, items: list[dict[str, Any]], recipe: PreprocessRecipe) -> None:
+        if not items:
+            raise ValueError("No images to score")
+        self.items = items
+        self.recipe = recipe
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    def patient_id_for_index(self, index: int) -> str:
+        return str(self.items[index].get("patient_id") or "unknown")
+
+    def filepath_for_index(self, index: int) -> str:
+        return str(Path(self.items[index]["path"]).resolve())
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        path = Path(self.items[index]["path"])
+        np_im = load_image_array(path, self.recipe)
+        tensor = torch.from_numpy(np_im).permute(2, 0, 1).contiguous()
+        return tensor, torch.tensor(0, dtype=torch.long)
+
+
+def items_from_manifest(
+    manifest_csv: Path,
+    *,
+    filepath_col: str = FILEPATH_COLUMN,
+    patient_col: str = PATIENT_ID_COLUMN,
+) -> list[dict[str, Any]]:
+    manifest_csv = Path(manifest_csv)
+    df = pd.read_csv(manifest_csv)
+    if filepath_col not in df.columns:
+        raise KeyError(f"{manifest_csv.name} missing {filepath_col!r}; have {list(df.columns)}")
+    items: list[dict[str, Any]] = []
+    for _, row in df.iterrows():
+        path = resolve_path(manifest_csv, str(row[filepath_col]))
+        pid = "unknown"
+        if patient_col in df.columns and not pd.isna(row.get(patient_col)):
+            pid = str(row[patient_col])
+        items.append({"path": path, "patient_id": pid})
+    if not items:
+        raise ValueError(f"Manifest empty: {manifest_csv}")
+    return items

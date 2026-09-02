@@ -1,0 +1,45 @@
+# UI library index: anatomy → modality → task → tools.
+# Recipe YAMLs (kl_grade.yaml, …) stay CLI overlays; this file is not a TrainingConfig.
+
+anatomies:
+  - id: knee
+    name: Knee
+    modalities:
+      - id: xray
+        name: X-ray
+        tasks:
+          - id: kl_grade
+            name: Kellgren-Lawrence osteoarthritis grade
+            tools:
+              - id: kl_grade_cnn
+                name: arth_tools CNN
+                recipe: kl_grade.yaml
+                infer: run_or_bundle
+                train: true
+              - id: kl_grade_gu2022
+                name: Gu et al. 2022 (MOST pipeline)
+                recipe: kl_grade_gu2022.yaml
+                infer: stub
+                train: false
+          - id: hka
+            name: Hip-knee-ankle angle
+            tools:
+              - id: hka_classical
+                name: arth_tools measurement
+                recipe: hka.yaml
+                infer: classical
+                train: false
+      - id: ultrasound
+        name: Ultrasound
+        tasks:
+          - id: omeract_synovitis
+            name: OMERACT-EULAR synovitis grade
+            tools:
+              - id: omeract_cnn
+                name: arth_tools CNN
+                recipe: omeract_synovitis.yaml
+                infer: run_or_bundle
+                train: true
+      - id: mri
+        name: MRI
+        tasks: []

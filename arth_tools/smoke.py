@@ -1,6 +1,6 @@
-"""End-to-end smoke: synthetic DICOM -> PNG -> patient splits -> train -> held-out eval.
+"""End-to-end smoke: synthetic DICOM -> prepare -> train -> eval -> infer, plus HKA.
 
-Uses local fixture paths (not E:\\) so the smoke run does not need the removable disk.
+Uses local fixture paths so the smoke run does not need a data disk.
 """
 
 from __future__ import annotations
@@ -13,8 +13,7 @@ import numpy as np
 from PIL import Image
 
 from arth_tools.data.dicom import load_patient_images_from_root, write_synthetic_dicom
-from arth_tools.data.export import export_from_dicom_root
-from arth_tools.data.splits import split_manifest_by_patient, write_split_manifests
+from arth_tools.data.prepare import prepare_dicom_root
 from arth_tools.paths import FIXTURES_DIR, TRAINING_REPORT_DIR
 from arth_tools.training.config import HPOConfig, TrainingConfig
 from arth_tools.training.evaluate import evaluate_run
@@ -53,8 +52,25 @@ def write_dicom_fixtures(dicom_dir: Path, n_patients: int = 6, n_per: int = 2) -
                 patient_name="Fixture",
                 pixels=pixels,
                 modality="US",
+                study_description=str(p % 2),
             )
     return dicom_dir
+
+
+def run_hka_smoke(work_dir: Path) -> dict:
+    from arth_tools.hka.config import HKAConfig
+    from arth_tools.hka.run import run_hka
+    from arth_tools.hka.synthetic import write_synthetic_longleg_dicom
+
+    dicom_dir = work_dir / "hka_dicoms"
+    write_synthetic_longleg_dicom(dicom_dir / "HKA001" / "longleg.dcm")
+    payload = run_hka(HKAConfig(dicom_root=dicom_dir, output_dir=work_dir / "hka_out"))
+    rec = next((r for r in payload["results"] if r.get("ok")), {})
+    return {
+        "n_ok": payload["n_ok"],
+        "summary": rec.get("summary"),
+        "output_dicom": rec.get("output_dicom"),
+    }
 
 
 def run_smoke(*, work_dir: Path | None = None) -> dict:
@@ -63,20 +79,15 @@ def run_smoke(*, work_dir: Path | None = None) -> dict:
         shutil.rmtree(work_dir)
     work_dir.mkdir(parents=True)
 
+    hka = run_hka_smoke(work_dir)
+
     dicom_dir = write_dicom_fixtures(work_dir / "dicoms")
     loaded = load_patient_images_from_root(dicom_dir, load_pixels=True)
-    image_root = work_dir / "png"
-    master = work_dir / "manifest_master.csv"
-    export_from_dicom_root(dicom_dir, image_root, master, default_label=0)
-
-    import pandas as pd
-
-    df = pd.read_csv(master)
-    df["label"] = df["patient_id"].astype(str).str.extract(r"(\d+)", expand=False).astype(int) % 2
-    df.to_csv(master, index=False)
-
-    assigned, report = split_manifest_by_patient(
-        df,
+    split_dir = work_dir / "splits"
+    paths = prepare_dicom_root(
+        dicom_dir,
+        image_root=work_dir / "png",
+        manifest_dir=split_dir,
         train_frac=0.5,
         val_frac=0.25,
         test_frac=0.25,
@@ -84,8 +95,7 @@ def run_smoke(*, work_dir: Path | None = None) -> dict:
         split_force_pt_strat=True,
         split_force_eq_dist=False,
     )
-    split_dir = work_dir / "splits"
-    paths = write_split_manifests(assigned, split_dir, report=report)
+    report = json.loads((split_dir / "split_report.json").read_text(encoding="utf-8"))
 
     cfg = TrainingConfig(
         architecture_id="cnn",
@@ -127,13 +137,22 @@ def run_smoke(*, work_dir: Path | None = None) -> dict:
     # Re-run eval from disk to prove the snapshot path (not just the in-memory hook).
     disk_eval = evaluate_run(Path(train_result["run_dir"]), split_name="test")
 
+    from arth_tools.inference.infer import collect_image_items, run_infer
+
+    infer_summary = run_infer(
+        Path(train_result["run_dir"]),
+        items=collect_image_items(dicom_dir),
+        out_csv=work_dir / "infer_predictions.csv",
+        device="cpu",
+    )
+
     out = {
         "n_dicom_patients": len(loaded),
         "split_ok": report["ok"],
         "split_report": report,
         "train": {
             k: train_result[k]
-            for k in ("run_id", "run_dir", "best_epoch", "best_metric", "frozen")
+            for k in ("run_id", "run_dir", "best_epoch", "best_metric", "frozen", "bundle_dir")
             if k in train_result
         },
         "eval": {
@@ -142,6 +161,11 @@ def run_smoke(*, work_dir: Path | None = None) -> dict:
             "image_accuracy": (disk_eval.get("image") or {}).get("accuracy"),
             "patient_accuracy": (disk_eval.get("patient") or {}).get("accuracy"),
         },
+        "infer": {
+            "n_images": infer_summary.get("n_images"),
+            "predictions": infer_summary.get("predictions"),
+        },
+        "hka": hka,
     }
     (work_dir / "smoke_summary.json").write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
     return out

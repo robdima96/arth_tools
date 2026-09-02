@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Load DICOM file-set metadata and instance datasets from disk into memory.
+Load DICOM datasets from a folder tree (optional DICOMDIR).
 
-Adapted from coding examples/ML Pipeline US DICOMs/DICOM_load.py.
-Pass paths as arguments rather than relying only on module-level configuration;
-the CONTROL BOARD defaults (E:\\DICOMwrapper) are used when run as __main__.
+Patient IDs come from the files themselves (PatientID, else StudyInstanceUID).
+The CONTROL BOARD DICOM_ROOT is used when run as __main__.
 """
 
 from __future__ import annotations
@@ -19,6 +18,8 @@ import pydicom
 from pydicom.errors import InvalidDicomError
 from pydicom.fileset import FileSet
 
+from arth_tools.data.labels import patient_id_from_dataset
+
 warnings.filterwarnings("ignore", category=UserWarning)
 
 PatientDict = dict[str, list[Any]]
@@ -32,7 +33,7 @@ def load_dicomdir_info(dicomdir_path: str | Path) -> PatientDict:
         dicomdir_path: Path to the directory containing 'DICOMDIR'.
 
     Returns:
-        dict: Keys are "{PatientID}_{LastNameNoSpaces}", values are empty lists.
+        dict: Keys are PatientID strings, values are empty lists.
     """
     dicomdir_path = Path(dicomdir_path)
     dicomdir_file = dicomdir_path / "DICOMDIR" if dicomdir_path.is_dir() else dicomdir_path
@@ -49,25 +50,18 @@ def load_dicomdir_info(dicomdir_path: str | Path) -> PatientDict:
         rec = node._record
         try:
             patient_id = rec.PatientID
-            patient_name = rec.PatientName
-            last_name = patient_name.family_name or "Unknown"
-            key = f"{patient_id}_{last_name}"
-            patient_dict[key] = []
+            if not patient_id:
+                continue
+            patient_dict[str(patient_id).strip()] = []
         except AttributeError:
             continue  # skip incomplete records
 
     return patient_dict
 
 
-def patient_key_from_dataset(ds: Any) -> str | None:
-    pid = ds.get("PatientID", None)
-    pname = ds.get("PatientName", None)
-    if pid and pname:
-        family = getattr(pname, "family_name", None) or str(pname)
-        return f"{pid}_{family}"
-    if pid:
-        return str(pid)
-    return None
+def patient_key_from_dataset(ds: Any, *, dicom_root: str | Path | None = None) -> str | None:
+    root = Path(dicom_root) if dicom_root is not None else None
+    return patient_id_from_dataset(ds, dicom_root=root)
 
 
 def load_patient_images_from_root(
@@ -82,7 +76,7 @@ def load_patient_images_from_root(
 
     Args:
         dicom_root_dir: Root directory containing any number of subfolders with DICOM files.
-        patient_dict: Dictionary from load_dicomdir_info, mapping patient keys to lists.
+        patient_dict: Dictionary from load_dicomdir_info, mapping patient IDs to lists.
             If None, keys are created from each file's PatientID.
         load_pixels: If True, loads pixel data; otherwise skips for speed.
         require_known_keys: If True, only keys already in patient_dict are kept.
@@ -94,8 +88,11 @@ def load_patient_images_from_root(
     valid_keys = set(patient_dict.keys())
     skip_exts = {".txt", ".xml", ".json", ".jpg", ".png", ".gif", ".bmp", ".etl", ".log", ".exe"}
 
+    root_path = Path(dicom_root_dir)
     for root, _, files in os.walk(str(dicom_root_dir)):
         for file in files:
+            if file.upper() == "DICOMDIR":
+                continue
             ext = os.path.splitext(file)[1].lower()
             if ext in skip_exts:
                 continue
@@ -104,7 +101,7 @@ def load_patient_images_from_root(
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", UserWarning)
                     ds = pydicom.dcmread(full_path, stop_before_pixels=not load_pixels, force=True)
-                key = patient_key_from_dataset(ds)
+                key = patient_key_from_dataset(ds, dicom_root=root_path)
                 if key is None:
                     continue
                 if require_known_keys and valid_keys and key not in valid_keys:
@@ -147,6 +144,13 @@ def write_synthetic_dicom(
     patient_name: str = "Fixture",
     pixels: Any | None = None,
     modality: str = "US",
+    study_description: str | None = None,
+    series_description: str | None = None,
+    photometric: str = "MONOCHROME2",
+    window_center: float | None = None,
+    window_width: float | None = None,
+    rescale_slope: float | None = None,
+    rescale_intercept: float | None = None,
 ) -> Path:
     """Write a tiny DICOM for smoke tests (no PHI)."""
     import numpy as np
@@ -169,6 +173,10 @@ def write_synthetic_dicom(
     ds.PatientID = patient_id
     ds.PatientName = patient_name
     ds.Modality = modality
+    if study_description is not None:
+        ds.StudyDescription = study_description
+    if series_description is not None:
+        ds.SeriesDescription = series_description
     ds.SOPClassUID = file_meta.MediaStorageSOPClassUID
     ds.SOPInstanceUID = file_meta.MediaStorageSOPInstanceUID
     ds.StudyInstanceUID = generate_uid()
@@ -176,12 +184,29 @@ def write_synthetic_dicom(
     ds.Rows = int(pixels.shape[0])
     ds.Columns = int(pixels.shape[1])
     ds.SamplesPerPixel = 1
-    ds.PhotometricInterpretation = "MONOCHROME2"
-    ds.BitsAllocated = 8
-    ds.BitsStored = 8
-    ds.HighBit = 7
-    ds.PixelRepresentation = 0
-    ds.PixelData = pixels.tobytes()
+    ds.PhotometricInterpretation = photometric
+    if pixels.dtype == np.uint16 or int(np.max(pixels)) > 255:
+        pix = np.asarray(pixels, dtype=np.uint16)
+        ds.BitsAllocated = 16
+        ds.BitsStored = 16
+        ds.HighBit = 15
+        ds.PixelRepresentation = 0
+        ds.PixelData = pix.tobytes()
+    else:
+        pix = np.asarray(pixels, dtype=np.uint8)
+        ds.BitsAllocated = 8
+        ds.BitsStored = 8
+        ds.HighBit = 7
+        ds.PixelRepresentation = 0
+        ds.PixelData = pix.tobytes()
+    if window_center is not None:
+        ds.WindowCenter = window_center
+    if window_width is not None:
+        ds.WindowWidth = window_width
+    if rescale_slope is not None:
+        ds.RescaleSlope = rescale_slope
+    if rescale_intercept is not None:
+        ds.RescaleIntercept = rescale_intercept
     ds.is_little_endian = True
     ds.is_implicit_VR = False
     ds.save_as(str(path), write_like_original=False)

@@ -75,7 +75,7 @@ def run_hpo(cfg: TrainingConfig | None = None) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Run Optuna HPO (or a single train if hpo.enabled is false).")
-    ap.add_argument("--config", type=Path, help="Optional YAML overlay")
+    ap.add_argument("--config", type=Path, help="Task YAML (configs/kl_grade.yaml or kl_grade)")
     args = ap.parse_args(argv)
     cfg = load_config_yaml(args.config) if args.config else TrainingConfig()
     print(json.dumps(run_hpo(cfg), indent=2, default=str))

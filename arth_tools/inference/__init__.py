@@ -1,0 +1,1 @@
+"""Unlabeled inference CLI."""

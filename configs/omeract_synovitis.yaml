@@ -1,0 +1,36 @@
+# OMERACT-EULAR synovitis grade (0–3). Overlay on the control board.
+# python -m arth_tools prepare --config omeract_synovitis --dicom-root /path/to/us
+# python -m arth_tools train   --config omeract_synovitis
+
+task_id: omeract_synovitis
+task_name: OMERACT-EULAR synovitis grade
+modality: ultrasound
+anatomy: joint
+num_classes: 4
+architecture_id: cnn
+
+dicom_root: dicoms/omeract_synovitis
+data_root: data/omeract_synovitis
+
+label_source: auto
+label_dicom_tag: StudyDescription
+label_map:
+  "0": 0
+  "1": 1
+  "2": 2
+  "3": 3
+
+allowed_modalities:
+  - US
+
+preprocess_consume: cnn_full
+
+info:
+  summary: OMERACT-EULAR synovitis grade (0–3) on ultrasound.
+  methods: ""
+  parameters: {}
+  citations: []
+  models: []
+  notes: >
+    Train uses the arth_tools CNN/ResNet harness on your labelled DICOMs,
+    not a paper replica. Infer a saved run directory or frozen bundle.

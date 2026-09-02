@@ -1,0 +1,31 @@
+# Hip-knee-ankle angle on standing AP long-leg x-ray.
+# python -m arth_tools hka --config hka --dicom-root /path/to/xrays
+
+task_id: hka
+task_name: Hip-knee-ankle angle (standing AP x-ray)
+modality: xray
+anatomy: lower_limb
+
+dicom_root: dicoms/hka
+data_root: data/hka
+output_dir: data/hka/annotated
+
+allowed_modalities:
+  - CR
+  - DX
+  - RF
+
+overlay: true
+max_hips: 2
+bone_percentile: 82.0
+preprocess_consume: decode_roi
+
+info:
+  summary: Hip-knee-ankle angle on standing AP long-leg x-ray.
+  methods: ""
+  parameters: {}
+  citations: []
+  models: []
+  notes: >
+    Classical landmarking on standing AP long-leg radiographs (not a trained
+    detector). Infer is built-in; this tool does not offer Train.

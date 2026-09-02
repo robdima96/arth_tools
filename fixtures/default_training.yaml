@@ -1,6 +1,5 @@
-# Optional YAML overlay on the CONTROL BOARD (arth_tools/training/config.py).
-# Real runs: edit the control board and run python -m arth_tools.training.train
-# Smoke tests build TrainingConfig in code and do not need this file.
+# Tiny overlay for experiments. Task recipes for real runs live in configs/
+# (kl_grade.yaml, omeract_synovitis.yaml). Smoke builds TrainingConfig in code.
 
 architecture_id: cnn
 architecture_name: VGG-inspired CNN

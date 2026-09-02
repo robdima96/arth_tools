@@ -196,6 +196,8 @@ def collect_predictions(
     loader: DataLoader,
     device: torch.device,
     loss_name: str,
+    *,
+    with_loss: bool = True,
 ) -> tuple[np.ndarray, np.ndarray, float]:
     model.eval()
     losses: list[float] = []
@@ -205,10 +207,11 @@ def collect_predictions(
         xb = xb.to(device)
         yb = yb.to(device)
         logits = forward_logits(model, xb)
-        loss = batch_loss(loss_name, logits, yb)
-        losses.append(float(loss.cpu().item()))
+        if with_loss:
+            loss = batch_loss(loss_name, logits, yb)
+            losses.append(float(loss.cpu().item()))
         log_np = logits.detach().cpu().numpy()
-        for i in range(yb.shape[0]):
+        for i in range(logits.shape[0]):
             ys.append(float(yb[i].detach().cpu().item()))
             score_rows.append(scores_from_logits(log_np[i : i + 1], loss_name).reshape(-1))
     y_np = np.asarray(ys, dtype=np.float64)

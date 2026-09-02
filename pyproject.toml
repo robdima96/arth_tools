@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "arth-tools"
 version = "0.2.0"
-description = "Export, split, train, and evaluate arthritis imaging models."
+description = "Arthritis imaging tools: DICOM prepare/train/eval and standing x-ray HKA."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -16,6 +16,7 @@ dependencies = [
     "pandas>=2.0",
     "pillow>=10.0",
     "scikit-learn>=1.4",
+    "scipy>=1.11",
     "pydicom>=2.4",
     "pydantic>=2.0",
     "pyyaml>=6.0",
@@ -26,6 +27,8 @@ dependencies = [
 
 [project.optional-dependencies]
 resnet = ["transformers>=4.40"]
+dev = ["pytest>=8.0"]
+ui = ["streamlit>=1.32"]
 
 [project.urls]
 Repository = "https://github.com/robdima96/arth_tools"
@@ -35,3 +38,10 @@ arth-tools = "arth_tools.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["arth_tools*"]
+
+[tool.setuptools.package-data]
+arth_tools = ["roi/cfgs/*.cfg"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

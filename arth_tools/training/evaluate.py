@@ -2,9 +2,9 @@
 """
 Held-out evaluation for a finished training run.
 
-Always reloads the run's config_snapshot.yaml + zscore.json + checkpoint so
-test-time preprocessing matches training. Do not score with whatever happens
-to be on the control board unless you pass --use-control-board.
+Always reloads the run (or frozen bundle) via load_classifier so test-time
+preprocessing matches training. Do not score with whatever happens to be on
+the control board unless you pass --use-control-board.
 
     python -m arth_tools eval --run-dir reporting/training/<run_id>
     python -m arth_tools eval --run-dir reporting/training/<run_id> --split val
@@ -23,7 +23,9 @@ import torch
 from torch.utils.data import DataLoader
 
 from arth_tools.data.dataset import ManifestClassificationDataset
-from arth_tools.training.backbones import build_cnn_model, build_model
+from arth_tools.data.preprocess import PreprocessRecipe
+from arth_tools.models.load import load_classifier, load_weights
+from arth_tools.training.backbones import build_model
 from arth_tools.training.config import TrainingConfig, load_config_yaml
 from arth_tools.training.metrics import (
     aggregate_by_patient,
@@ -61,36 +63,6 @@ def find_checkpoint(run_dir: Path, explicit: Path | None = None) -> Path:
         if cand.is_file():
             return cand
     raise FileNotFoundError(f"No checkpoint in {run_dir}")
-
-
-def build_eval_model(cfg: TrainingConfig) -> torch.nn.Module:
-    if cfg.architecture_id.lower() in {"cnn", "tiny_cnn", "tinycnn", "vgg_cnn"}:
-        return build_cnn_model(
-            output_type=cfg.output_type,
-            num_kernels=cfg.num_kernels,
-            kernel_size=tuple(cfg.kernel_size),
-            conv_stride=tuple(cfg.conv_stride),
-            pool_stride=tuple(cfg.pool_stride),
-            activation_func=cfg.activation_func,
-            input_height=cfg.input_height,
-            input_width=cfg.input_width,
-            input_channels=cfg.input_channels,
-            num_classes=cfg.num_classes,
-            drop=cfg.drop,
-            spatial_drop=cfg.spatial_drop,
-        )
-    return build_model(cfg)
-
-
-def load_weights(model: torch.nn.Module, checkpoint: Path) -> None:
-    blob = torch.load(checkpoint, map_location="cpu", weights_only=False)
-    if isinstance(blob, dict) and "model_state_dict" in blob:
-        state = blob["model_state_dict"]
-    elif isinstance(blob, dict) and all(isinstance(k, str) for k in blob):
-        state = blob
-    else:
-        raise ValueError(f"Unrecognized checkpoint format: {checkpoint}")
-    model.load_state_dict(state)
 
 
 def apply_saved_zscore(ds: ManifestClassificationDataset, run_dir: Path) -> None:
@@ -187,17 +159,29 @@ def evaluate_run(
     print(f"Run dir: {run_dir}")
     print(f"Split: {split_name}")
 
+    recipe_obj = None
     if use_control_board:
         cfg = cfg or TrainingConfig()
         print("Using live CONTROL BOARD (not the run snapshot).")
+        ckpt = find_checkpoint(run_dir, checkpoint)
+        model = build_model(cfg)
+        load_weights(model, ckpt)
+        recipe_mean = recipe_std = None
+        recipe_obj = PreprocessRecipe.from_training_config(cfg)
     else:
-        cfg = cfg or load_run_config(run_dir)
+        loaded = load_classifier(run_dir, checkpoint=checkpoint)
+        cfg = cfg or loaded.cfg
+        model = loaded.model
+        ckpt = loaded.weights_path
+        recipe_mean, recipe_std = loaded.recipe.zscore_mean, loaded.recipe.zscore_std
+        recipe_obj = loaded.recipe
 
     thresh = float(cfg.binary_threshold if threshold is None else threshold)
     do_patient = cfg.eval_patient_aggregate if patient_aggregate is None else patient_aggregate
     man = _manifest_for_split(cfg, split_name, manifest)
-    ckpt = find_checkpoint(run_dir, checkpoint)
     dev = device if isinstance(device, torch.device) else resolve_device(device or cfg.device)
+    model = model.to(dev)
+    model.eval()
 
     print(f"Manifest: {man}")
     print(f"Checkpoint: {ckpt}")
@@ -215,8 +199,12 @@ def evaluate_run(
         regression=regression,
         output_type=cfg.output_type,
         loss_name=cfg.loss_name,
+        recipe=recipe_obj,
     )
-    apply_saved_zscore(ds, run_dir)
+    if use_control_board:
+        apply_saved_zscore(ds, run_dir)
+    elif recipe_mean is not None and recipe_std is not None:
+        ds.set_zscore(float(recipe_mean), float(recipe_std))
 
     loader = DataLoader(
         ds,
@@ -224,10 +212,6 @@ def evaluate_run(
         shuffle=False,
         num_workers=int(cfg.dataloader_num_workers),
     )
-    model = build_eval_model(cfg).to(dev)
-    load_weights(model, ckpt)
-    model.eval()
-
     y, scores, avg_loss = collect_predictions(model, loader, dev, cfg.loss_name)
     pred = (
         scores.reshape(-1)

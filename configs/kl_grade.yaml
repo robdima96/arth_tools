@@ -1,0 +1,41 @@
+# Kellgren-Lawrence knee OA grade (0–4). Overlay on the control board.
+# python -m arth_tools prepare --config kl_grade --dicom-root /path/to/xrays
+# python -m arth_tools train   --config kl_grade
+# python -m arth_tools train   --config kl_grade --architecture resnet50
+# Optional: label_source: csv, label_csv: data/kl_grade/kl_grades.csv, label_csv_join: patient_id
+
+task_id: kl_grade
+task_name: Kellgren-Lawrence osteoarthritis grade
+modality: xray
+anatomy: knee
+num_classes: 5
+architecture_id: cnn
+
+dicom_root: dicoms/kl_grade
+data_root: data/kl_grade
+
+label_source: auto
+label_dicom_tag: StudyDescription
+label_map:
+  "0": 0
+  "1": 1
+  "2": 2
+  "3": 3
+  "4": 4
+
+allowed_modalities:
+  - CR
+  - DX
+  - RF
+
+preprocess_consume: cnn_full
+
+info:
+  summary: Kellgren-Lawrence osteoarthritis grade (0–4) on knee radiographs.
+  methods: ""
+  parameters: {}
+  citations: []
+  models: []
+  notes: >
+    Train uses the arth_tools CNN/ResNet harness on your labelled DICOMs,
+    not a paper replica. Infer a saved run directory or frozen bundle.

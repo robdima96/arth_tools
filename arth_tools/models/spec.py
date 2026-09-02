@@ -1,7 +1,8 @@
 """Model specification schema (architecture, task, freeze criteria).
 
 The live knobs live on the CONTROL BOARD (`arth_tools.training.config`). This
-module is the JSON/YAML dump used in run reports and (later) the tool registry.
+module is the JSON/YAML dump used in run reports and the frozen model bundle.
+Architectures are registered in `arth_tools.models.registry`.
 """
 
 from __future__ import annotations
@@ -40,6 +41,8 @@ class ModelSpec(BaseModel):
     version: str = "0.1.0"
     citation: Citation = Field(default_factory=Citation)
     pretrained_id: str = ""
+    task_id: str = ""
+    task_name: str = ""
     modality: str = "unspecified"
     anatomy: str = "unspecified"
     input_height: int = 224
@@ -74,6 +77,10 @@ def spec_from_training_config(cfg: TrainingConfig) -> ModelSpec:
         architecture_id=cfg.architecture_id,
         architecture_name=cfg.architecture_name,
         pretrained_id=cfg.pretrained_id,
+        task_id=cfg.task_id,
+        task_name=cfg.task_name,
+        modality=cfg.modality or "unspecified",
+        anatomy=cfg.anatomy or "unspecified",
         input_height=cfg.input_height,
         input_width=cfg.input_width,
         input_channels=cfg.input_channels,

@@ -1,4 +1,4 @@
-"""Epoch curve graphs written next to epochs.csv (IPFP plotted these after fit)."""
+"""Epoch curve graphs written next to epochs.csv after fit."""
 
 from __future__ import annotations
 

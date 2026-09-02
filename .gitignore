@@ -22,13 +22,19 @@ pip-wheel-metadata/
 credentials.json
 secrets.json
 
-# --- Editors / OS ---
+# --- Editors / OS / local tooling ---
 .idea/
 .vscode/
+.cursor/
+.pytest_cache/
 *.swp
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# --- Local DICOM input / derived artifacts (defaults) ---
+/dicoms/
+/data/
 
 # --- Weights, pickles, medical pixels ---
 *.pt
@@ -38,6 +44,7 @@ desktop.ini
 *.pickle
 *.dcm
 *.nrrd
+arth_tools/data/roi_weights/**
 
 # --- Generated runs (keep folder READMEs) ---
 fixtures/smoke/

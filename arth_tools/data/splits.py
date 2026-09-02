@@ -2,7 +2,7 @@
 """
 Patient-id grouped train/val/test splits with a leakage report.
 
-Matches the IPFP control-board toggles:
+Control-board toggles:
   SPLIT_FORCE_PT_STRAT — no patient appears in more than one split
   SPLIT_FORCE_EQ_DIST  — shuffle within label buckets so class mix is roughly even
 """
@@ -21,6 +21,7 @@ from sklearn.model_selection import train_test_split
 from arth_tools.training.config import (
     LABEL_COLUMN,
     MANIFEST_DIR,
+    MANIFEST_MASTER,
     PATIENT_ID_COLUMN,
     SEED,
     SPLIT_FORCE_EQ_DIST,
@@ -28,6 +29,8 @@ from arth_tools.training.config import (
     TEST_SPLIT,
     TRAIN_SPLIT,
     VAL_SPLIT,
+    TrainingConfig,
+    load_config_yaml,
 )
 
 PATIENT_COL = PATIENT_ID_COLUMN
@@ -248,32 +251,36 @@ def write_split_manifests(
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Split a master manifest by patient_id.")
-    ap.add_argument("--manifest", type=Path, required=True)
-    ap.add_argument("--out-dir", type=Path, default=MANIFEST_DIR)
-    ap.add_argument("--train", type=float, default=TRAIN_SPLIT)
-    ap.add_argument("--val", type=float, default=VAL_SPLIT)
-    ap.add_argument("--test", type=float, default=TEST_SPLIT)
-    ap.add_argument("--seed", type=int, default=SEED)
-    ap.add_argument("--stratify", action="store_true", default=SPLIT_FORCE_EQ_DIST)
+    ap = argparse.ArgumentParser(description="Split a master manifest by patient_id (from DICOM).")
+    ap.add_argument("--config", type=Path, help="Task YAML (configs/kl_grade.yaml or kl_grade)")
+    ap.add_argument("--manifest", type=Path)
+    ap.add_argument("--out-dir", type=Path)
+    ap.add_argument("--train", type=float)
+    ap.add_argument("--val", type=float)
+    ap.add_argument("--test", type=float)
+    ap.add_argument("--seed", type=int)
+    ap.add_argument("--stratify", action="store_true", default=None)
     ap.add_argument("--no-patient-strat", action="store_true")
     ap.add_argument("--patient-col", default=PATIENT_COL)
     ap.add_argument("--label-col", default=LABEL_COL)
     args = ap.parse_args(argv)
 
-    df = pd.read_csv(args.manifest)
+    cfg = load_config_yaml(args.config) if args.config else TrainingConfig()
+    manifest = args.manifest or cfg.master_manifest
+    out_dir = args.out_dir or cfg.manifest_dir
+    df = pd.read_csv(manifest)
     assigned, report = split_manifest_by_patient(
         df,
         patient_col=args.patient_col,
         label_col=args.label_col,
-        train_frac=args.train,
-        val_frac=args.val,
-        test_frac=args.test,
-        seed=args.seed,
-        split_force_eq_dist=bool(args.stratify),
-        split_force_pt_strat=not args.no_patient_strat,
+        train_frac=args.train if args.train is not None else cfg.train_split,
+        val_frac=args.val if args.val is not None else cfg.val_split,
+        test_frac=args.test if args.test is not None else cfg.test_split,
+        seed=args.seed if args.seed is not None else cfg.seed,
+        split_force_eq_dist=bool(args.stratify) if args.stratify is not None else cfg.split_force_eq_dist,
+        split_force_pt_strat=not args.no_patient_strat if args.no_patient_strat else cfg.split_force_pt_strat,
     )
-    paths = write_split_manifests(assigned, args.out_dir, report=report)
+    paths = write_split_manifests(assigned, Path(out_dir), report=report)
     print(json.dumps({k: str(v) for k, v in paths.items()}, indent=2))
     print(json.dumps(report, indent=2, default=str))
     return 0

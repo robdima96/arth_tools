@@ -1,0 +1,11 @@
+# Header YOLO (x-ray). Not a catalog tool / not a TrainingConfig overlay.
+modality: xray
+class_name: image_region
+img_size: 416
+conf_threshold: 0.25
+rotation_deg: 15.0
+hflip: false
+epochs: 50
+batch_size: 8
+learning_rate: 0.001
+data_root: data/roi
