@@ -1,6 +1,6 @@
 # arth_tools
 
-Local tools for **knee osteoarthritis imaging** research. Point the library at a folder of **DICOM** files to prepare data, train or evaluate a classifier, run unlabeled inference, measure the hip–knee–ankle (HKA) angle, or browse the same tools in a Streamlit UI.
+Local tools for **knee osteoarthritis imaging** research. Point the library at a folder of **DICOM** files to prepare data, train or evaluate a classifier, run unlabeled inference, or browse the same tools in a Streamlit UI.
 
 Repository: [github.com/robdima96/arth_tools](https://github.com/robdima96/arth_tools)
 
@@ -31,12 +31,6 @@ pip install -e ".[resnet]"   # Hugging Face ResNet-50
 ```text
 python -m arth_tools ui
 ```
-
-The library is a tree: **anatomy → modality → task → tool** (`configs/catalog.yaml`). Knee always lists X-ray, Ultrasound, and MRI; empty slots say there are no tasks yet.
-
-Each tool has **Infer** and **Info**. **Train** is offered only on native CNN tools (`cnn` or `resnet50` from the architecture registry). Infer uses that tool’s backend: a saved run directory, a frozen bundle, the built-in HKA measurement, or a disabled stub when a literature pipeline is not wired yet.
-
-Infer and Train require **Load preview** first (a random sample of up to 10 decoded images). Train also shows the same files after the preprocess recipe.
 
 ## Command line
 
@@ -70,53 +64,4 @@ label_csv_join: patient_id
 label_csv_column: label
 ```
 
-## Tasks
 
-Recipe YAMLs under `configs/` overlay library defaults in `arth_tools/training/config.py`. `--config kl_grade` is enough; relative paths resolve from the repo root.
-
-| Recipe | Role | Modality filter |
-| --- | --- | --- |
-| `configs/kl_grade.yaml` | Kellgren–Lawrence 0–4 | `CR`, `DX`, `RF` |
-| `configs/omeract_synovitis.yaml` | OMERACT–EULAR 0–3 | `US` |
-| `configs/hka.yaml` | Hip–knee–ankle angle | `CR`, `DX`, `RF` |
-
-`configs/catalog.yaml` is the UI index (multiple tools can sit under one task). CLI recipes are unchanged.
-
-Default folders when you omit `--config`: DICOMs in `<repo>/dicoms` (`ARTH_DICOM_ROOT`), derived files in `<repo>/data` (`ARTH_DATA_ROOT`).
-
-## Pipeline
-
-1. **Prepare** — DICOMs → PNG + master manifest → train/val/test CSVs (no patient in two splits).
-2. **Train** — `cnn` or `resnet50` via the architecture registry; writes a reloadable `bundle/`.
-3. **Eval** — held-out test from the run snapshot or bundle (not live defaults, unless `--use-control-board`).
-4. **Infer** — unlabeled DICOM or PNG folder → `predictions.csv`.
-
-Train sizes the classification head from `label_map.json` written by prepare. Metrics are reported at image and patient level.
-
-## Smoke test
-
-```text
-python -m arth_tools smoke
-```
-
-This generates tiny synthetic DICOMs under `fixtures/smoke/`, then runs prepare → train → eval → infer and a short HKA check. Those outputs are gitignored.
-
-```text
-pip install -e ".[dev]"
-pytest
-```
-
-## Layout
-
-| Path | Role |
-| --- | --- |
-| `arth_tools/` | Package (data, training, inference, HKA, UI) |
-| `arth_tools/training/config.py` | Library defaults |
-| `configs/` | Task recipes and `catalog.yaml` |
-| `tests/` | Unit tests |
-| `fixtures/default_training.yaml` | Optional YAML overlay |
-| `reporting/training/` | Per-run reports (generated; README only in git) |
-
-## License
-
-MIT. Third-party model weights cited in the UI (for example Gu et al. 2022) are **not** included. Those authors license their code and weights separately (CC BY-NC-SA 4.0); download them from the paper repository if you need them.
